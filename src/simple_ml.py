@@ -1,3 +1,4 @@
+from cProfile import label
 import struct
 import numpy as np
 import gzip
@@ -20,10 +21,41 @@ def add(x, y):
         Sum of x + y
     """
     ### BEGIN YOUR CODE
-    pass
+    return x + y
     ### END YOUR CODE
 
-
+def read_images(b:bytes):
+    """ Read images from a byte array in MNIST format.
+        Return a numpy array which shape is (images, rows, columns)
+    """
+    import struct
+    magic, images, rows, columns = struct.unpack_from('>IIII' , b , 0)
+    if magic != 0x00000803:
+        raise ValueError('Magic number mismatch, expected 2051, got %d' % magic)
+    if images < 0:
+        raise ValueError('Invalid number of images: %d' % images)
+    base = struct.calcsize('>IIII')
+    format = '>' + str(rows * columns) + 'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array whose shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(images)],dtype="float32")
+    return result_array
+def read_labels(b:bytes):
+    """ Read labels from a byte array in MNIST format.
+        Return a numpy array which shape is (labels, rows, columns)
+    """
+    import struct
+    magic, labels = struct.unpack_from('>II' , b , 0)
+    if magic != 0x00000801:
+        raise ValueError('Magic number mismatch, expected 2049, got %d' % magic)
+    if labels < 0:
+        raise ValueError('Invalid number of images: %d' % labels)
+    base = struct.calcsize('>II')
+    format = '>' +'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array which shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(labels)],dtype=np.uint8).reshape((labels,))
+    return result_array
 def parse_mnist(image_filename, label_filename):
     """ Read an images and labels file in MNIST format.  See this page:
     http://yann.lecun.com/exdb/mnist/ for a description of the file format.
@@ -48,7 +80,15 @@ def parse_mnist(image_filename, label_filename):
                 for MNIST will contain the values 0-9.
     """
     ### BEGIN YOUR CODE
-    pass
+    with gzip.open(image_filename,'rb') as f:
+        b = f.read()
+        X = read_images(b)
+        # normalize
+        X = (X - X.min()) / (X.max() - X.min())
+    with gzip.open(label_filename,'rb') as f:
+        b = f.read()
+        y = read_labels(b)
+    return X, y
     ### END YOUR CODE
 
 
@@ -68,7 +108,11 @@ def softmax_loss(Z, y):
         Average softmax loss over the sample.
     """
     ### BEGIN YOUR CODE
-    pass
+    # take z_y by index
+    zy = Z[np.arange(len(Z)), y]
+
+    # use the formula to compute loss
+    return (np.log(np.exp(Z).sum(axis=1)) - zy).mean()
     ### END YOUR CODE
 
 
@@ -91,9 +135,37 @@ def softmax_regression_epoch(X, y, theta, lr = 0.1, batch=100):
         None
     """
     ### BEGIN YOUR CODE
-    pass
+    for i in range(0, len(X), batch):
+        # get the batch
+        batch_x = X[i:i+batch]
+        batch_y = y[i:i+batch]
+        # compute the gradient
+        m = batch_x.shape[0]
+        k = theta.shape[1]
+        tmp_Z = np.exp(batch_x.dot(theta))
+        Z = tmp_Z / tmp_Z.sum(axis=1).reshape((-1,1))
+        I_y = np.zeros((m,k))
+        I_y[np.arange(len(I_y)), batch_y] = 1
+        diff_softmax = (batch_x.T @ (Z - I_y)) / m
+
+        theta -= lr * diff_softmax
+    
     ### END YOUR CODE
 
+def relu(Z):
+    """ Compute the ReLU activation function on the input.
+
+    Args:
+        Z (np.ndarray[np.float32]): 2D numpy array of shape
+            (batch_size, num_classes), containing the logit predictions for
+            each class.
+
+    Returns:
+        np.ndarray[np.float32]: 2D numpy array of shape
+            (batch_size, num_classes), containing the ReLU activation of the
+            input.
+    """
+    return np.maximum(Z, 0)
 
 def nn_epoch(X, y, W1, W2, lr = 0.1, batch=100):
     """ Run a single epoch of SGD for a two-layer neural network defined by the
@@ -118,7 +190,20 @@ def nn_epoch(X, y, W1, W2, lr = 0.1, batch=100):
         None
     """
     ### BEGIN YOUR CODE
-    pass
+    for i in range(0, len(X), batch):
+        # get the batch
+        batch_x = X[i:i+batch]
+        batch_y = y[i:i+batch]
+        m = batch_x.shape[0]
+        k = W2.shape[1]
+        Z1 = relu(batch_x @ W1)
+        Iy = np.zeros((m,k))
+        Iy[np.arange(len(Iy)), batch_y] = 1
+        G2 = np.exp(Z1 @ W2)
+        G2 = G2 / G2.sum(axis=1).reshape((-1,1)) - Iy
+        G1 = ((Z1>0)+0) * (G2 @ W2.T)
+        W2 -= lr * (Z1.T @ G2) / m
+        W1 -= lr * (batch_x.T @ G1) / m
     ### END YOUR CODE
 
 
