@@ -1,12 +1,46 @@
+from re import I
 import struct
 import gzip
 import numpy as np
 
 import sys
+
+from needle.autograd import Tensor
 sys.path.append('python/')
 import needle as ndl
 
-
+def read_images(b:bytes):
+    """ Read images from a byte array in MNIST format.
+        Return a numpy array which shape is (images, rows, columns)
+    """
+    import struct
+    magic, images, rows, columns = struct.unpack_from('>IIII' , b , 0)
+    if magic != 0x00000803:
+        raise ValueError('Magic number mismatch, expected 2051, got %d' % magic)
+    if images < 0:
+        raise ValueError('Invalid number of images: %d' % images)
+    base = struct.calcsize('>IIII')
+    format = '>' + str(rows * columns) + 'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array whose shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(images)],dtype="float32")
+    return result_array
+def read_labels(b:bytes):
+    """ Read labels from a byte array in MNIST format.
+        Return a numpy array which shape is (labels, rows, columns)
+    """
+    import struct
+    magic, labels = struct.unpack_from('>II' , b , 0)
+    if magic != 0x00000801:
+        raise ValueError('Magic number mismatch, expected 2049, got %d' % magic)
+    if labels < 0:
+        raise ValueError('Invalid number of images: %d' % labels)
+    base = struct.calcsize('>II')
+    format = '>' +'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array which shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(labels)],dtype=np.uint8).reshape((labels,))
+    return result_array
 def parse_mnist(image_filesname, label_filename):
     """ Read an images and labels file in MNIST format.  See this page:
     http://yann.lecun.com/exdb/mnist/ for a description of the file format.
@@ -30,9 +64,16 @@ def parse_mnist(image_filesname, label_filename):
                 for MNIST will contain the values 0-9.
     """
     ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
+    with gzip.open(image_filesname,'rb') as f:
+        b = f.read()
+        X = read_images(b)
+        # normalize
+        X = (X - X.min()) / (X.max() - X.min())
+    with gzip.open(label_filename,'rb') as f:
+        b = f.read()
+        y = read_labels(b)
+    return X, y
     ### END YOUR SOLUTION
-
 
 def softmax_loss(Z, y_one_hot):
     """ Return softmax loss.  Note that for the purposes of this assignment,
@@ -51,7 +92,9 @@ def softmax_loss(Z, y_one_hot):
         Average softmax loss over the sample. (ndl.Tensor[np.float32])
     """
     ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
+    y = (Z * y_one_hot).sum(axes=(1,))
+    n = Z.shape[0]
+    return (ndl.log(ndl.exp(Z).sum(axes=(1,))) - y).sum() / n
     ### END YOUR SOLUTION
 
 
@@ -80,9 +123,22 @@ def nn_epoch(X, y, W1, W2, lr = 0.1, batch=100):
     """
 
     ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
+    for i in range(0, len(X), batch):
+        # get the batch
+        batch_x = Tensor(X[i:i+batch],dtype=X.dtype,requires_grad=True)
+        batch_y = y[i:i+batch]
+        m = batch_x.shape[0]
+        k = W2.shape[1]
+        Z1 = ndl.relu(batch_x @ W1)
+        Iy = np.zeros((m,k))
+        Iy[np.arange(len(Iy)), batch_y] = 1
+        Iy = Tensor(Iy,dtype=batch_y.dtype,requires_grad=True)
+        f = softmax_loss(Z1 @ W2,Iy)
+        f.backward()
+        W2 -= lr * (W2.grad.data)
+        W1 -= lr * (W1.grad.data)
     ### END YOUR SOLUTION
-
+    return W1, W2
 
 ### CODE BELOW IS FOR ILLUSTRATION, YOU DO NOT NEED TO EDIT
 
