@@ -25,7 +25,12 @@ class SGD(Optimizer):
 
     def step(self):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        # for p in self.params:
+         for idx, param in enumerate(self.params):
+            # self.u[para] = self.momentum * self.u.get(para, 0) + (1 - self.momentum)*para.grad.cached_data
+            # print(para.grad.cached_data)
+            self.params[idx].data -= self.lr * param.grad.detach().cached_data
+            # print(para.cached_data)
         ### END YOUR SOLUTION
 
 
