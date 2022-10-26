@@ -91,7 +91,7 @@ class Linear(Module):
         ### BEGIN YOUR SOLUTION
         self.weight = Parameter(kaiming_uniform(in_features, out_features, device=device, dtype=dtype))
         if bias:
-            self.bias = Parameter(kaiming_uniform(out_features,1, device=device, dtype=dtype).transpose())
+            self.bias = Parameter(kaiming_uniform(out_features,1, device=device, dtype=dtype).reshape((1, out_features)))
         else:
             self.bias = None
         
@@ -107,7 +107,12 @@ class Linear(Module):
         """
         result = X @ self.weight
         if self.bias:
-            return result + self.bias.broadcast_to((X.shape[0], self.out_features))
+            if self.bias.shape[0] != 1:
+                right_shape = [1 for _ in range(len(result.shape))]
+                right_shape[-1] = self.bias.shape[-1]
+                self.bias = self.bias.reshape(right_shape)
+            bias = ops.broadcast_to(self.bias, result.shape)
+            return result + bias
         else:
             return result
         ### END YOUR SOLUTION
@@ -175,23 +180,21 @@ class BatchNorm1d(Module):
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
         n,m = x.shape # n stands for batch size, m stands for features
-        current_mean = ops.summation(x,axes=(0,)) / n
-        current_mean_broadcast = ops.broadcast_to(current_mean.reshape((1,m)),x.shape)
-        current_var = ops.summation((x - current_mean_broadcast) ** 2,axes=(0,)) / n
-        self.running_mean = (1-self.momentum) * self.running_mean + self.momentum * current_mean
-        self.running_var  = (1-self.momentum) * self.running_var + self.momentum * current_var
+        weight = ops.broadcast_to(self.weight.reshape((1,m)),x.shape)
+        bias = ops.broadcast_to(self.bias.reshape((1,m)),x.shape)
         if self.training:
+            current_mean = ops.summation(x,axes=(0,)) / n
+            current_mean_broadcast = ops.broadcast_to(current_mean.reshape((1,m)),x.shape)
+            current_var = ops.summation((x - current_mean_broadcast) ** 2,axes=(0,)) / n
+            self.running_mean = (1-self.momentum) * self.running_mean.data + self.momentum * current_mean.data
+            self.running_var  = (1-self.momentum) * self.running_var.data + self.momentum * current_var.data
             mean = current_mean_broadcast
             var = ops.broadcast_to(current_var.reshape((1,m)),x.shape)
+            return weight * (x - mean)/((var+self.eps)**0.5) + bias
         else:
-            # not test
             mean = ops.broadcast_to(self.running_mean.reshape((1,m)),x.shape)
             var = ops.broadcast_to(self.running_var.reshape((1,m)),x.shape)
-        return self.weight * (x - mean)/((var+self.eps)**0.5) + self.bias
-        # n,m = x.shape # n stands for batch size, m stands for features
-        # mean = ops.broadcast_to( (ops.summation(x,axes=(0,)) / n).reshape((1,m)),x.shape)
-        # var = ops.broadcast_to((ops.summation((x - mean) ** 2,axes=(0,)) / n).reshape((1,m)),x.shape)
-        # return self.weight * (x - mean)/((var+self.eps)**0.5) + self.bias
+            return weight * (x - mean)/((var+self.eps)**0.5) + bias
         ### END YOUR SOLUTION
 
 
@@ -207,11 +210,12 @@ class LayerNorm1d(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         ### BEGIN YOUR SOLUTION
-        # print(x.shape)
         n,m = x.shape # n stands for batch size, m stands for features
         mean = ops.broadcast_to( (ops.summation(x,axes=(1,)) / m).reshape((n,1)),x.shape)
         var = ops.broadcast_to((ops.summation((x - mean) ** 2,axes=(1,)) / m).reshape((n,1)),x.shape)
-        return self.weight * (x - mean)/((var+self.eps)**0.5) + self.bias
+        weight = ops.broadcast_to(self.weight.reshape((1,m)),x.shape)
+        bias = ops.broadcast_to(self.bias.reshape((1,m)),x.shape)
+        return weight * (x - mean)/((var+self.eps)**0.5) + bias
         
         ### END YOUR SOLUTION
 
@@ -239,6 +243,4 @@ class Residual(Module):
         ### BEGIN YOUR SOLUTION
         return self.fn(x) + x
         ### END YOUR SOLUTION
-
-
 

@@ -180,7 +180,7 @@ class DivScalar(TensorOp):
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
-        return (array_api.divide(out_grad.numpy,self.scalar,dtype=out_grad.dtype),)
+        return (out_grad / self.scalar,)
         ### END YOUR SOLUTION
 
 

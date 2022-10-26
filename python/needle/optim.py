@@ -27,10 +27,12 @@ class SGD(Optimizer):
         ### BEGIN YOUR SOLUTION
         # for p in self.params:
          for idx, param in enumerate(self.params):
-            # self.u[para] = self.momentum * self.u.get(para, 0) + (1 - self.momentum)*para.grad.cached_data
-            # print(para.grad.cached_data)
-            self.params[idx].data -= self.lr * param.grad.detach().cached_data
-            # print(para.cached_data)
+            if param.grad is None:
+                continue
+            # TODO: change this to a more efficient way
+            graident = ndl.Tensor(param.grad.detach().cached_data,dtype=param.dtype)+self.weight_decay*ndl.Tensor(param.detach().cached_data,dtype=param.dtype)
+            self.u[param] = self.momentum * self.u.get(param, 0) + (1 - self.momentum)*graident
+            self.params[idx].data -= self.lr * self.u[param]
         ### END YOUR SOLUTION
 
 
@@ -57,5 +59,17 @@ class Adam(Optimizer):
 
     def step(self):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        self.t += 1
+        for param in self.params:
+            if param.grad is None:
+                continue
+            grad = ndl.Tensor(param.grad.detach().cached_data,dtype=param.dtype)+self.weight_decay*param.data
+            
+            self.m[param] = self.beta1 * self.m.get(param, 0) + (1 - self.beta1) * grad.data
+            self.v[param] = self.beta2 * self.v.get(param, 0) + (1 - self.beta2) * (grad.data * grad.data)
+            # bias correction
+            m_hat = self.m[param].data / (1 - self.beta1 ** self.t)
+            v_hat = self.v[param].data / (1 - self.beta2 ** self.t)
+            
+            param.data -= self.lr * m_hat / (v_hat**0.5+self.eps)     
         ### END YOUR SOLUTION

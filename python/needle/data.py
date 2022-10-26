@@ -1,3 +1,4 @@
+from email.mime import image
 import numpy as np
 from .autograd import Tensor
 
@@ -15,7 +16,7 @@ class RandomFlipHorizontal(Transform):
 
     def __call__(self, img):
         """
-        Horizonally flip an image, specified as n H x W x C NDArray.
+        Horizonally flip an image, specified as a H x W x C NDArray.
         Args:
             img: H x W x C NDArray of an image
         Returns:
@@ -24,7 +25,10 @@ class RandomFlipHorizontal(Transform):
         """
         flip_img = np.random.rand() < self.p
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        if flip_img:
+            return np.flip(img, axis=1)
+        else:
+            return img
         ### END YOUR SOLUTION
 
 
@@ -42,7 +46,18 @@ class RandomCrop(Transform):
         """
         shift_x, shift_y = np.random.randint(low=-self.padding, high=self.padding+1, size=2)
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        assert len(img.shape) == 3 
+        h,w,_ = img.shape
+        if shift_x > 0:
+            x_padding,x_range = (0,shift_x),(shift_x,h+shift_x)
+        else:
+            x_padding,x_range =  (-shift_x,0),(0,h)
+        if shift_y > 0:
+            y_padding,y_range = (0,shift_y),(shift_y,w+shift_y)
+        else:
+            y_padding,y_range =  (-shift_y,0),(0,w)
+        new_img = np.pad(img, (x_padding,y_padding,(0,0)))
+        return new_img[x_range[0]:x_range[1], y_range[0]:y_range[1], :]
         ### END YOUR SOLUTION
 
 
@@ -98,18 +113,63 @@ class DataLoader:
         if not self.shuffle:
             self.ordering = np.array_split(np.arange(len(dataset)), 
                                            range(batch_size, len(dataset), batch_size))
+        else:
+            arr = np.arange(len(dataset))
+            np.random.shuffle(arr)
+            self.ordering = np.array_split(arr, range(batch_size, len(dataset), batch_size))
 
     def __iter__(self):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        self.pointer = 0
         ### END YOUR SOLUTION
         return self
 
     def __next__(self):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        if self.pointer >= len(self.ordering):
+            raise StopIteration
+        else:
+            result = [Tensor(obj) for obj in self.dataset[self.ordering[self.pointer]]]
+            # result = (Tensor(data),Tensor(label))
+        self.pointer += 1 
+        return result
         ### END YOUR SOLUTION
 
+### My code
+import gzip
+def read_images(b:bytes):
+    """ Read images from a byte array in MNIST format.
+        Return a numpy array which shape is (images, rows, columns)
+    """
+    import struct
+    magic, images, rows, columns = struct.unpack_from('>IIII' , b , 0)
+    if magic != 0x00000803:
+        raise ValueError('Magic number mismatch, expected 2051, got %d' % magic)
+    if images < 0:
+        raise ValueError('Invalid number of images: %d' % images)
+    base = struct.calcsize('>IIII')
+    format = '>' + str(rows * columns) + 'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array whose shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(images)],dtype="float32")
+    return result_array
+def read_labels(b:bytes):
+    """ Read labels from a byte array in MNIST format.
+        Return a numpy array which shape is (labels, rows, columns)
+    """
+    import struct
+    magic, labels = struct.unpack_from('>II' , b , 0)
+    if magic != 0x00000801:
+        raise ValueError('Magic number mismatch, expected 2049, got %d' % magic)
+    if labels < 0:
+        raise ValueError('Invalid number of images: %d' % labels)
+    base = struct.calcsize('>II')
+    format = '>' +'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array which shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(labels)],dtype=np.uint8).reshape((labels,))
+    return result_array
+###
 
 class MNISTDataset(Dataset):
     def __init__(
@@ -119,17 +179,39 @@ class MNISTDataset(Dataset):
         transforms: Optional[List] = None,
     ):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        with gzip.open(image_filename,'rb') as f:
+            b = f.read()
+            X = read_images(b)
+            X = (X - X.min()) / (X.max() - X.min())
+            self.images = X
+        with gzip.open(label_filename,'rb') as f:
+            b = f.read()
+            self.labels = read_labels(b)
+        assert len(self.images) == len(self.labels) 
+        # if transforms is not None:
+        #     images = self.images.reshape((-1,28,28))
+        #     images = np.swapaxes(images,0,2)
+        #     images = np.swapaxes(images,0,1)
+        #     for transform in transforms:
+        #         images = transform(images)
+        #     images = np.swapaxes(images,0,1)
+        #     images = np.swapaxes(images,0,2)
+        #     self.images = images.reshape(self.images.shape)
+        self.transforms = transforms
         ### END YOUR SOLUTION
 
     def __getitem__(self, index) -> object:
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        images = self.images[index]
+        if self.transforms is not None:
+            for transform in self.transforms:
+                images = transform(images)
+        return images, self.labels[index]
         ### END YOUR SOLUTION
 
     def __len__(self) -> int:
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        return len(self.images)
         ### END YOUR SOLUTION
 
 class NDArrayDataset(Dataset):
