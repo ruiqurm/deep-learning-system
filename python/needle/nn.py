@@ -91,7 +91,7 @@ class Linear(Module):
         ### BEGIN YOUR SOLUTION
         self.weight = Parameter(kaiming_uniform(in_features, out_features, device=device, dtype=dtype))
         if bias:
-            self.bias = Parameter(kaiming_uniform(out_features,1, device=device, dtype=dtype).reshape((1, out_features)))
+            self.bias = Parameter(kaiming_uniform(out_features,1, device=device, dtype=dtype).transpose())
         else:
             self.bias = None
         
@@ -105,16 +105,20 @@ class Linear(Module):
         shape(self.bias) = (1, out_features)
         shape(output) = (N, out_features)
         """
-        result = X @ self.weight
+        # result = X @ self.weight
+        # if self.bias:
+        #     if self.bias.shape[0] != 1:
+        #         right_shape = [1 for _ in range(len(result.shape))]
+        #         right_shape[-1] = self.bias.shape[-1]
+        #         self.bias = self.bias.reshape(right_shape)
+        #     bias = ops.broadcast_to(self.bias, result.shape)
+        #     return result + bias
+        # else:
+        #     return result
+        X = ops.matmul(X, self.weight)
         if self.bias:
-            if self.bias.shape[0] != 1:
-                right_shape = [1 for _ in range(len(result.shape))]
-                right_shape[-1] = self.bias.shape[-1]
-                self.bias = self.bias.reshape(right_shape)
-            bias = ops.broadcast_to(self.bias, result.shape)
-            return result + bias
-        else:
-            return result
+            X = ops.add(X, ops.broadcast_to(self.bias, X.shape))
+        return X
         ### END YOUR SOLUTION
 
 
@@ -172,8 +176,8 @@ class BatchNorm1d(Module):
         ### BEGIN YOUR SOLUTION
         self.weight = Parameter(ones(dim, device=device, dtype=dtype))
         self.bias = Parameter(zeros(dim, device=device, dtype=dtype))
-        self.running_mean = zeros(dim, device=device, dtype=dtype)
-        self.running_var = ones(dim, device=device, dtype=dtype)
+        self.running_mean = zeros(dim, device=device, dtype='float64')
+        self.running_var = ones(dim, device=device, dtype='float64')
         ### END YOUR SOLUTION
 
 
@@ -194,7 +198,7 @@ class BatchNorm1d(Module):
         else:
             mean = ops.broadcast_to(self.running_mean.reshape((1,m)),x.shape)
             var = ops.broadcast_to(self.running_var.reshape((1,m)),x.shape)
-            return weight * (x - mean)/((var+self.eps)**0.5) + bias
+            return weight * (x - mean)/((var+self.eps)**0.5) 
         ### END YOUR SOLUTION
 
 

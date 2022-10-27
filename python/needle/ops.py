@@ -241,16 +241,24 @@ class BroadcastTo(TensorOp):
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
+        # input_shape = node.inputs[0].shape
+        # indexes = []
+        # for index,i in enumerate(zip_longest(input_shape, self.shape)):
+        #     a,b = i[0],i[1]
+        #     if a is None: a = 1 
+        #     if a != b:
+        #         indexes.append(index)
+        # indexes = tuple(indexes)
+        # result = reshape(summation(out_grad, axes=indexes), input_shape)
+        # return (result,)
         input_shape = node.inputs[0].shape
-        indexes = []
-        for index,i in enumerate(zip_longest(input_shape, self.shape)):
-            a,b = i[0],i[1]
-            if a is None: a = 1 
-            if a != b:
-                indexes.append(index)
-        indexes = tuple(indexes)
-        result = reshape(summation(out_grad, axes=indexes), input_shape)
-        return (result,)
+        base_shape = [1] * (len(self.shape) - len(input_shape)) + list(input_shape)
+        axes = []
+        for i in range(len(base_shape)):
+            if self.shape[i] != base_shape[i]:
+                axes.append(i)
+        out_grad = summation(out_grad, axes=tuple(axes))
+        return (reshape(out_grad, input_shape),)
         ### END YOUR SOLUTION
 
 

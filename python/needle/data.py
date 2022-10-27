@@ -113,14 +113,19 @@ class DataLoader:
         if not self.shuffle:
             self.ordering = np.array_split(np.arange(len(dataset)), 
                                            range(batch_size, len(dataset), batch_size))
-        else:
-            arr = np.arange(len(dataset))
-            np.random.shuffle(arr)
-            self.ordering = np.array_split(arr, range(batch_size, len(dataset), batch_size))
+        # else:
+        #     arr = np.arange(len(dataset))
+        #     np.random.shuffle(arr)
+        #     self.ordering = np.array_split(arr, range(batch_size, len(dataset), batch_size))
 
     def __iter__(self):
         ### BEGIN YOUR SOLUTION
         self.pointer = 0
+        if self.shuffle:
+            tmp_range = np.arange(len(self.dataset))
+            np.random.shuffle(tmp_range)
+            self.ordering = np.array_split(tmp_range,
+                range(self.batch_size, len(self.dataset), self.batch_size))
         ### END YOUR SOLUTION
         return self
 
@@ -188,25 +193,16 @@ class MNISTDataset(Dataset):
             b = f.read()
             self.labels = read_labels(b)
         assert len(self.images) == len(self.labels) 
-        # if transforms is not None:
-        #     images = self.images.reshape((-1,28,28))
-        #     images = np.swapaxes(images,0,2)
-        #     images = np.swapaxes(images,0,1)
-        #     for transform in transforms:
-        #         images = transform(images)
-        #     images = np.swapaxes(images,0,1)
-        #     images = np.swapaxes(images,0,2)
-        #     self.images = images.reshape(self.images.shape)
         self.transforms = transforms
         ### END YOUR SOLUTION
 
     def __getitem__(self, index) -> object:
         ### BEGIN YOUR SOLUTION
-        images = self.images[index]
+        images = self.images[index].reshape((28,28,-1))
         if self.transforms is not None:
             for transform in self.transforms:
                 images = transform(images)
-        return images, self.labels[index]
+        return images.reshape((-1,784,)), self.labels[index]
         ### END YOUR SOLUTION
 
     def __len__(self) -> int:
