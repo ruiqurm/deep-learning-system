@@ -405,7 +405,7 @@ class LogSumExp(TensorOp):
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
         Z = node.inputs[0]
-        maxz_in_z_shape = array_api.max(Z.cached_data, axis=self.axes)
+        # maxz_in_z_shape = array_api.max(Z.cached_data, axis=self.axes)
         if self.axes is None:
             axes = tuple(range(len(Z.shape)))
         else:
