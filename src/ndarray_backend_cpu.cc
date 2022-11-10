@@ -329,7 +329,10 @@ void ReduceMax(const AlignedArray& a, AlignedArray* out, size_t reduce_size) {
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  for(int i = 0;i != out->size;i++){
+    auto base = a.ptr + i * reduce_size;
+    out->ptr[i] = *std::max_element(base,base+reduce_size);
+  }
   /// END YOUR SOLUTION
 }
 
@@ -344,7 +347,11 @@ void ReduceSum(const AlignedArray& a, AlignedArray* out, size_t reduce_size) {
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  for(int i = 0;i != out->size;i++){
+    auto base = a.ptr + i * reduce_size;
+    // out[i] = std::reduce(base, base+reduce_size); // can only be used in cpp 17
+    out->ptr[i] = std::accumulate(base,base+reduce_size,static_cast<scalar_t>(0));
+  }
   /// END YOUR SOLUTION
 }
 
