@@ -5,7 +5,10 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
-
+#include <algorithm>
+#include <numeric>
+using std::cout;
+using std::endl;
 namespace needle {
 namespace cpu {
 
@@ -43,8 +46,51 @@ void Fill(AlignedArray* out, scalar_t val) {
   }
 }
 
+class CompactIndex{
+  public:
+    CompactIndex(const size_t offset,std::vector<uint32_t>& shape,std::vector<uint32_t>& stride):
+      offset(offset),size(shape.size()),index(std::vector<uint32_t>(shape.size(),0)),shape(shape),stride(stride),_is_end(false){}
 
+    inline void inc(){
+      index[size-1]++; 
+      // increase, and then adjust;
+      for(int i = size-1;i>=0;i--){
+        if (index[i]  == shape[i]){
+          // note that we start from zero, 
+          // so when we encouter shape[i],we should carry.
+          index[i] = 0;
+          if (i > 0){
+            index[i-1]++;
+          }else{
+            _is_end = true;
+          }
+        }else{
+          // otherwise we just break the loop.
+          break;
+        }
+      }
+    }
 
+    inline size_t get(){
+      // get real offset
+      size_t ret = 0;
+      for(int i = 0;i<size;i++){
+        ret += index[i]*stride[i];
+      }
+      return offset + ret;
+    }
+
+    inline bool is_end(){
+      return _is_end;
+    }
+    private:
+    const int size;
+    const size_t offset;
+    std::vector<uint32_t> index;
+    const std::vector<uint32_t>& shape;
+    const std::vector<uint32_t>& stride;
+    bool _is_end;
+};
 
 void Compact(const AlignedArray& a, AlignedArray* out, std::vector<uint32_t> shape,
              std::vector<uint32_t> strides, size_t offset) {
@@ -63,7 +109,13 @@ void Compact(const AlignedArray& a, AlignedArray* out, std::vector<uint32_t> sha
    *  function will implement here, so we won't repeat this note.)
    */
   /// BEGIN YOUR SOLUTION
-  
+  CompactIndex indices(offset, shape,strides);
+  int counter = 0;
+  while(!indices.is_end()){
+    out->ptr[counter] = a.ptr[indices.get()];
+    indices.inc();
+    counter++;
+  }
   /// END YOUR SOLUTION
 }
 
@@ -80,7 +132,14 @@ void EwiseSetitem(const AlignedArray& a, AlignedArray* out, std::vector<uint32_t
    *   offset: offset of the *out* array (not a, which has zero offset, being compact)
    */
   /// BEGIN YOUR SOLUTION
-  
+  CompactIndex indices(offset, shape,strides);
+  int counter = 0;
+  while(!indices.is_end()){
+    out->ptr[indices.get()] = a.ptr[counter];
+    // note there is data in the zero position.
+    indices.inc();
+    counter++;
+  }
   /// END YOUR SOLUTION
 }
 
@@ -101,27 +160,16 @@ void ScalarSetitem(const size_t size, scalar_t val, AlignedArray* out, std::vect
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  CompactIndex indices(offset, shape,strides);
+  int counter = 0;
+  while(!indices.is_end()){
+    out->ptr[indices.get()] = val;
+    indices.inc();
+    counter++;
+  }
   /// END YOUR SOLUTION
 }
 
-void EwiseAdd(const AlignedArray& a, const AlignedArray& b, AlignedArray* out) {
-  /**
-   * Set entries in out to be the sum of correspondings entires in a and b.
-   */
-  for (size_t i = 0; i < a.size; i++) {
-    out->ptr[i] = a.ptr[i] + b.ptr[i];
-  }
-}
-
-void ScalarAdd(const AlignedArray& a, scalar_t val, AlignedArray* out) {
-  /**
-   * Set entries in out to be the sum of corresponding entry in a plus the scalar val.
-   */
-  for (size_t i = 0; i < a.size; i++) {
-    out->ptr[i] = a.ptr[i] + val;
-  }
-}
 
 
 /**
@@ -145,6 +193,52 @@ void ScalarAdd(const AlignedArray& a, scalar_t val, AlignedArray* out) {
  */
 
 /// BEGIN YOUR SOLUTION
+#define EWiseOp(NAME,OP) \
+void Ewise##NAME(const AlignedArray& a, const AlignedArray& b, AlignedArray* out) {\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = a.ptr[i] OP b.ptr[i];                                     \
+  }                                                                         \
+}
+#define ScalarOp(NAME,OP) \
+void Scalar##NAME(const AlignedArray& a, scalar_t val, AlignedArray* out){\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = a.ptr[i] OP val;                                     \
+  }                                                                         \
+}
+#define EWiseFunction(NAME,F) \
+void Ewise##NAME(const AlignedArray& a, AlignedArray* out) {\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = F(a.ptr[i]);                                     \
+  }                                                                         \
+}
+#define ScalarFunction(NAME,F) \
+void Scalar##NAME(const AlignedArray& a, scalar_t val, AlignedArray* out){\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = F(a.ptr[i],val);                                     \
+  }                                                                         \
+}
+inline static scalar_t max(scalar_t a,scalar_t b){return a>b? a:b;}
+EWiseOp(Add,+)
+EWiseOp(Mul,*)
+EWiseOp(Div,/)
+EWiseOp(Eq,==)
+EWiseOp(Ge,>=)
+EWiseFunction(Log,log)
+EWiseFunction(Exp,exp)
+EWiseFunction(Tanh,tanh)
+ScalarOp(Add,+)
+ScalarOp(Mul,*)
+ScalarOp(Div,/)
+ScalarOp(Eq,==)
+ScalarOp(Ge,>=)
+ScalarFunction(Power,pow)
+ScalarFunction(Maximum,max)
+void EwiseMaximum(const AlignedArray& a,const AlignedArray& b,AlignedArray* out) {\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = max(a.ptr[i],b.ptr[i]);                                     \
+  }                                                                         \
+}
+
 
 /// END YOUR SOLUTION
 
