@@ -5,7 +5,7 @@
 
 #include <iostream>
 #include <sstream>
-
+#include <numeric>
 namespace needle {
 namespace cuda {
 
@@ -336,9 +336,80 @@ EwiseFuncTwoParm(Maximum,max)
 ////////////////////////////////////////////////////////////////////////////////
 // Elementwise and scalar operations
 ////////////////////////////////////////////////////////////////////////////////
+#define MATMUL_BLOCK_S 16
+#define MATMUL_BLOCK_L 16
+#define MATMUL_TILE 8
+#define BLOCK_SIZE (MATMUL_BLOCK_S*MATMUL_BLOCK_L*sizeof(scalar_t))
+CudaDims CudaMatrixDim(size_t m,size_t n,size_t p) {
+  CudaDims dim;
+  size_t a_lines = (m + MATMUL_BLOCK_L - 1) / MATMUL_BLOCK_L;
+  size_t b_columns = (p + MATMUL_BLOCK_L - 1) / MATMUL_BLOCK_L;
+  dim.block = dim3(MATMUL_BLOCK_L/MATMUL_TILE, MATMUL_BLOCK_L/MATMUL_TILE, 1);
+  dim.grid = dim3(b_columns, a_lines, 1);
+  return dim;
+}
+ 
+__device__ scalar_t static inline get_data_or_zero(const scalar_t* data, size_t i, size_t j, size_t m, size_t n) {
+  return i<m && j<n ? data[i*n+j] : 0;
+}
 
+__global__ void MatmulKernel(const scalar_t* A, const scalar_t* B,scalar_t* O,
+                             uint32_t m, uint32_t n,uint32_t p) {
+  __shared__ scalar_t sA[MATMUL_BLOCK_L][MATMUL_BLOCK_S],sB[MATMUL_BLOCK_S][MATMUL_BLOCK_L];
+  scalar_t c[MATMUL_TILE][MATMUL_TILE] = {0};
+  scalar_t a[MATMUL_TILE],b[MATMUL_TILE];
+  int real_m = m,real_n = n,real_p = p;
+  int ybase = blockIdx.y*blockDim.y +threadIdx.y;
+  int xbase = blockIdx.x*blockDim.x +threadIdx.x;
+  n = MATMUL_BLOCK_S*((n + MATMUL_BLOCK_S - 1) / MATMUL_BLOCK_S);
 
+  for(int ko=0;ko < n;ko += MATMUL_BLOCK_S){
+    __syncthreads();
+    // block level
+    // cp data to shared memory
+    if (threadIdx.x == 0 && threadIdx.y ==0){
+      for(int i =0;i<MATMUL_BLOCK_S;i++){
+        for(int j=0;j<MATMUL_BLOCK_L;j++){
+          sA[j][i] = get_data_or_zero(A,j+blockIdx.y*MATMUL_BLOCK_L,ko+i,real_m,real_n);
+          sB[i][j] = get_data_or_zero(B,ko+i,j+blockIdx.x*MATMUL_BLOCK_L,real_n,real_p);
+        }
+      }
 
+    }
+      
+    __syncthreads();
+    // thread_level
+    for(int ki=0;ki<MATMUL_BLOCK_S;++ki){
+      // copy data to register
+      for(int i=0;i<MATMUL_TILE;i++){
+        a[i] = sA[threadIdx.y*MATMUL_TILE+i][ki]; // a vector of size MATMUL_TILE*1
+        b[i] = sB[ki][threadIdx.x*MATMUL_TILE+i]; // a vector of size 1*MATMUL_TILE
+      }
+      for(int y=0;y<MATMUL_TILE;++y){
+        for(int x =0;x<MATMUL_TILE;++x){
+          c[y][x] += a[y]*b[x];
+          // if (threadIdx.y==0&&threadIdx.x==0){
+          //   printf("%f ",a[y]*b[x]);
+          // }
+        }
+      }
+    }
+  }
+
+  // copy data back to global memory
+  // because each thread is responsible for specific MATMUL_TILE*MATMUL_TILE elements,
+  // there's no need to use atomic operation
+  for (int i = 0;i<MATMUL_TILE;i++){
+    for(int j = 0;j<MATMUL_TILE;j++){
+      if (ybase*MATMUL_TILE+i < real_m && xbase*MATMUL_TILE + j < real_p){
+        O[(ybase*MATMUL_TILE+i)*real_p+xbase*MATMUL_TILE + j] = c[i][j];
+      }
+    }
+  }
+}
+#include<iostream>
+using std::cout;
+using std::endl;
 void Matmul(const CudaArray& a, const CudaArray& b, CudaArray* out, uint32_t M, uint32_t N,
             uint32_t P) {
   /**
@@ -364,7 +435,8 @@ void Matmul(const CudaArray& a, const CudaArray& b, CudaArray* out, uint32_t M, 
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  auto dim = CudaMatrixDim(M,N,P);
+  MatmulKernel<<<dim.grid,dim.block,BLOCK_SIZE*2>>>(a.ptr,b.ptr,out->ptr,M,N,P);
   /// END YOUR SOLUTION
 }
 
@@ -372,8 +444,66 @@ void Matmul(const CudaArray& a, const CudaArray& b, CudaArray* out, uint32_t M, 
 // Max and sum reductions
 ////////////////////////////////////////////////////////////////////////////////
 
+// maybe not correct if the size is larger than the block?
+// __global__ void ReduceMaxKernel(const scalar_t *a,scalar_t* out,size_t size,size_t reduce_size,size_t fixed_reduce_size){
+//   extern __shared__ scalar_t smem[];
+//   size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+//   if (gid >= size)return;
+//   size_t group_id = gid / reduce_size;
+//   size_t group_offset = gid % reduce_size;
+//   size_t base = group_id * fixed_reduce_size;
+//   size_t fixed_gid = base + group_offset;
+//   if(group_offset==0){
+//     smem[base] = a[gid];
+//     for(int i=reduce_size;i<fixed_reduce_size;i++){
+//       smem[base+i] = -1e10;
+//     }
+//   }else{
+//     smem[fixed_gid] = a[gid];
+//   }
+//   __syncthreads();
+//   for (unsigned int s=fixed_reduce_size/2; s>0; s>>=1) 
+//   {
+//     if (group_offset < s){
+//       smem[fixed_gid] = max(smem[fixed_gid], smem[fixed_gid + s]);
+//     }
+//       __syncthreads();
+//   }
+//   if(group_offset==0){
+//     out[group_id] = smem[fixed_gid];
+//   }
+// }
 
+__device__ void mat_reduce_max(const scalar_t a,const scalar_t b,scalar_t* out){
+  *out = a>b?a:b;
+}
+__device__ void mat_reduce_sum(const scalar_t a,const scalar_t b,scalar_t* out){
+  *out = a+b;
+}
 
+#define MAT_REDUCE_TILE 32
+template<void REDUCE_FUNC(const scalar_t,const scalar_t,scalar_t*) >
+__global__ void ReduceMaxKernel(const scalar_t *a,scalar_t* out,size_t reduce_size,scalar_t INIT_VALUE ){
+  extern __shared__ scalar_t smem[]; // used to save result reduced by each thread
+  // printf("blockDim.x:%d,blockIdx.x:%d,threadIdx.x:%d\n",blockDim.x,blockIdx.x,threadIdx.x);
+  scalar_t max_v = INIT_VALUE;
+  size_t base =  blockIdx.x * reduce_size;
+  size_t offset = threadIdx.x * MAT_REDUCE_TILE;
+  const scalar_t* a_with_offset = a + offset + base;
+  for(int i=0;i<MAT_REDUCE_TILE;i++){
+    if (offset + i >= reduce_size)break;
+    REDUCE_FUNC(a_with_offset[i],max_v,&max_v);
+  }
+  smem[threadIdx.x] = max_v;
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    max_v = smem[0];
+    for (int i = 1; i < blockDim.x; i++) {
+      REDUCE_FUNC(max_v, smem[i],&max_v);
+    }
+    out[blockIdx.x] = max_v;
+  }
+}
 void ReduceMax(const CudaArray& a, CudaArray* out, size_t reduce_size) {
   /**
    * Reduce by taking maximum over `reduce_size` contiguous blocks.  Even though it is inefficient,
@@ -385,12 +515,13 @@ void ReduceMax(const CudaArray& a, CudaArray* out, size_t reduce_size) {
    *   redice_size: size of the dimension to reduce over
    */
   /// BEGIN YOUR SOLUTION
-  
+  CudaDims dim;
+  dim.grid = dim3(a.size / reduce_size, 1, 1);
+  dim.block = dim3( (reduce_size+MAT_REDUCE_TILE-1) / MAT_REDUCE_TILE, 1, 1);
+  size_t size_of_shared_memory = ((reduce_size+MAT_REDUCE_TILE-1) / MAT_REDUCE_TILE) * sizeof(scalar_t);
+  ReduceMaxKernel<mat_reduce_max><<<dim.grid, dim.block,size_of_shared_memory>>>(a.ptr,out->ptr,reduce_size,std::numeric_limits<float>::lowest());
   /// END YOUR SOLUTION
 }
-
-
-
 
 void ReduceSum(const CudaArray& a, CudaArray* out, size_t reduce_size) {
   /**
@@ -403,7 +534,17 @@ void ReduceSum(const CudaArray& a, CudaArray* out, size_t reduce_size) {
    *   redice_size: size of the dimension to reduce over
    */
   /// BEGIN YOUR SOLUTION
-  
+  // size_t fixed_reduce_size = 1;
+  // size_t row = a.size / reduce_size;
+  // while(fixed_reduce_size<reduce_size)fixed_reduce_size<<=1;
+  // size_t shared_memory = row * fixed_reduce_size * sizeof(scalar_t);
+  // CudaDims dim = CudaOneDim(a.size);
+  // ReduceSumKernel<<<dim.grid, dim.block,shared_memory>>>(a.ptr,out->ptr,a.size,reduce_size,fixed_reduce_size);
+  CudaDims dim;
+  dim.grid = dim3(a.size / reduce_size, 1, 1);
+  dim.block = dim3( (reduce_size+MAT_REDUCE_TILE-1) / MAT_REDUCE_TILE, 1, 1);
+  size_t size_of_shared_memory = ((reduce_size+MAT_REDUCE_TILE-1) / MAT_REDUCE_TILE) * sizeof(scalar_t);
+  ReduceMaxKernel<mat_reduce_sum><<<dim.grid, dim.block,size_of_shared_memory>>>(a.ptr,out->ptr,reduce_size,0);
   /// END YOUR SOLUTION
 }
 
