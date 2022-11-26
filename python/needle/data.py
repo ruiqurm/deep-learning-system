@@ -5,7 +5,6 @@ import pickle
 from typing import Iterator, Optional, List, Sized, Union, Iterable, Any
 from needle import backend_ndarray as nd
 
-
 class Transform:
     def __call__(self, x):
         raise NotImplementedError
@@ -26,7 +25,10 @@ class RandomFlipHorizontal(Transform):
         """
         flip_img = np.random.rand() < self.p
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        if flip_img:
+            return np.flip(img, axis=1)
+        else:
+            return img
         ### END YOUR SOLUTION
 
 
@@ -46,7 +48,18 @@ class RandomCrop(Transform):
             low=-self.padding, high=self.padding + 1, size=2
         )
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        assert len(img.shape) == 3 
+        h,w,_ = img.shape
+        if shift_x > 0:
+            x_padding,x_range = (0,shift_x),(shift_x,h+shift_x)
+        else:
+            x_padding,x_range =  (-shift_x,0),(0,h)
+        if shift_y > 0:
+            y_padding,y_range = (0,shift_y),(shift_y,w+shift_y)
+        else:
+            y_padding,y_range =  (-shift_y,0),(0,w)
+        new_img = np.pad(img, (x_padding,y_padding,(0,0)))
+        return new_img[x_range[0]:x_range[1], y_range[0]:y_range[1], :]
         ### END YOUR SOLUTION
 
 
@@ -74,6 +87,11 @@ class Dataset:
                 x = tform(x)
         return x
 
+### MY IMPL
+def split_range(a, n):
+    k, m = divmod(len(a), n)
+    return (a[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(n))
+### END MY IMPL
 
 class DataLoader:
     r"""
@@ -100,21 +118,69 @@ class DataLoader:
         self.shuffle = shuffle
         self.batch_size = batch_size
         if not self.shuffle:
-            self.ordering = np.array_split(
-                np.arange(len(dataset)), range(batch_size, len(dataset), batch_size)
-            )
+            # self.ordering = np.array_split(
+            #     np.arange(len(dataset)), range(batch_size, len(dataset), batch_size)
+            # )
+            n = len(dataset)
+            strdie = batch_size
+            self.ordering = [slice(i,min(n,i+strdie)) for i in range(0,n,strdie)]
 
     def __iter__(self):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        self.pointer = 0
+        if self.shuffle:
+            tmp_range = np.arange(len(self.dataset))
+            np.random.shuffle(tmp_range)
+            n = len(self.dataset)
+            strdie = self.batch_size
+            self.ordering = [slice(i,min(n,i+strdie)) for i in range(0,n,strdie)]
         ### END YOUR SOLUTION
         return self
 
     def __next__(self):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        if self.pointer >= len(self.ordering):
+            raise StopIteration
+        else:
+            result = tuple([Tensor(obj) for obj in self.dataset[self.ordering[self.pointer]]])
+            # result = (Tensor(data),Tensor(label))
+        self.pointer += 1 
+        return result
         ### END YOUR SOLUTION
 
+import gzip
+def read_images(b:bytes):
+    """ Read images from a byte array in MNIST format.
+        Return a numpy array which shape is (images, rows, columns)
+    """
+    import struct
+    magic, images, rows, columns = struct.unpack_from('>IIII' , b , 0)
+    if magic != 0x00000803:
+        raise ValueError('Magic number mismatch, expected 2051, got %d' % magic)
+    if images < 0:
+        raise ValueError('Invalid number of images: %d' % images)
+    base = struct.calcsize('>IIII')
+    format = '>' + str(rows * columns) + 'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array whose shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(images)],dtype="float32")
+    return result_array
+def read_labels(b:bytes):
+    """ Read labels from a byte array in MNIST format.
+        Return a numpy array which shape is (labels, rows, columns)
+    """
+    import struct
+    magic, labels = struct.unpack_from('>II' , b , 0)
+    if magic != 0x00000801:
+        raise ValueError('Magic number mismatch, expected 2049, got %d' % magic)
+    if labels < 0:
+        raise ValueError('Invalid number of images: %d' % labels)
+    base = struct.calcsize('>II')
+    format = '>' +'B'
+    offset = struct.calcsize(format)
+    # now we get a numpy array which shape is (images, rows, columns)
+    result_array = np.array([ struct.unpack_from(format,b,base+i*offset) for i in range(labels)],dtype=np.uint8).reshape((labels,))
+    return result_array
 
 class MNISTDataset(Dataset):
     def __init__(
@@ -124,20 +190,33 @@ class MNISTDataset(Dataset):
         transforms: Optional[List] = None,
     ):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        with gzip.open(image_filename,'rb') as f:
+            b = f.read()
+            X = read_images(b)
+            X = (X - X.min()) / (X.max() - X.min())
+            self.images = X
+        with gzip.open(label_filename,'rb') as f:
+            b = f.read()
+            self.labels = read_labels(b)
+        assert len(self.images) == len(self.labels) 
+        self.transforms = transforms
         ### END YOUR SOLUTION
 
     def __getitem__(self, index) -> object:
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        images = self.images[index].reshape((28,28,-1))
+        if self.transforms is not None:
+            for transform in self.transforms:
+                images = transform(images)
+        return images.reshape((-1,784,)), self.labels[index]
         ### END YOUR SOLUTION
 
     def __len__(self) -> int:
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        return len(self.images)
         ### END YOUR SOLUTION
 
-
+from functools import lru_cache
 class CIFAR10Dataset(Dataset):
     def __init__(
         self,
@@ -156,16 +235,48 @@ class CIFAR10Dataset(Dataset):
         y - numpy array of labels
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        import pickle
+        if train:
+            for _,_,filenames in os.walk(base_folder):
+                for filename in sorted(filenames):
+                    if filename.startswith("data_batch"):
+                        with open(os.path.join(base_folder,filename),'rb') as f:
+                            data = pickle.load(f,encoding='bytes')
+                            if 'X' in locals():
+                                X = np.concatenate((X,data[b'data']),axis=0)
+                                y = np.concatenate((y,data[b'labels']),axis=0)
+                            else:
+                                X = data[b'data']
+                                y = data[b'labels']
+        else:
+            with open(os.path.join(base_folder,"test_batch"),'rb') as f:
+                data = pickle.load(f,encoding='bytes')
+                X = data[b'data']
+                y = data[b'labels']
+        X = X.astype('float32')
+        X /= 255
+        assert len(X) == len(y)
+        self.X = X
+        self.y = y
         ### END YOUR SOLUTION
-
-    def __getitem__(self, index) -> object:
+    def __getitem__(self, index: Union[int,slice,tuple]) -> object:
         """
         Returns the image, label at given index
         Image should be of shape (3, 32, 32)
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        if isinstance(index,int):
+            X,y = self.X[index].reshape((3,32,32)),self.y[index]
+        elif isinstance(index,slice):
+            X,y = self.X[index].reshape((-1,3,32,32)),self.y[index]
+        elif isinstance(index,tuple):
+            X,y = self.X[index,].reshape((-1,3,32,32)),self.y[index,]
+        else:
+            raise
+        if hasattr(self,'transforms'):
+            for transform in self.transforms:
+                X = transform(X)
+        return X, y
         ### END YOUR SOLUTION
 
     def __len__(self) -> int:
@@ -173,7 +284,7 @@ class CIFAR10Dataset(Dataset):
         Returns the total number of examples in the dataset
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        return len(self.X)
         ### END YOUR SOLUTION
 
 

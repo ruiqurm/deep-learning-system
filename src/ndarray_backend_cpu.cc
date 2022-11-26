@@ -44,7 +44,51 @@ void Fill(AlignedArray* out, scalar_t val) {
 }
 
 
+class CompactIndex{
+  public:
+    CompactIndex(const size_t offset,const std::vector<int32_t>& shape,const std::vector<int32_t>& stride):
+      offset(offset),size(shape.size()),index(std::vector<int32_t>(shape.size(),0)),shape(shape),stride(stride),_is_end(false){}
 
+    inline void inc(){
+      index[size-1]++; 
+      // increase, and then adjust;
+      for(int i = size-1;i>=0;i--){
+        if (index[i]  == shape[i]){
+          // note that we start from zero, 
+          // so when we encouter shape[i],we should carry.
+          index[i] = 0;
+          if (i > 0){
+            index[i-1]++;
+          }else{
+            _is_end = true;
+          }
+        }else{
+          // otherwise we just break the loop.
+          break;
+        }
+      }
+    }
+
+    inline size_t get(){
+      // get real offset
+      size_t ret = 0;
+      for(int i = 0;i<size;i++){
+        ret += index[i]*stride[i];
+      }
+      return offset + ret;
+    }
+
+    inline bool is_end(){
+      return _is_end;
+    }
+    private:
+      const int size;
+      const size_t offset;
+      std::vector<int32_t> index;
+      const std::vector<int32_t>& shape;
+      const std::vector<int32_t>& stride;
+      bool _is_end;
+};
 
 void Compact(const AlignedArray& a, AlignedArray* out, std::vector<int32_t> shape,
              std::vector<int32_t> strides, size_t offset) {
@@ -63,7 +107,13 @@ void Compact(const AlignedArray& a, AlignedArray* out, std::vector<int32_t> shap
    *  function will implement here, so we won't repeat this note.)
    */
   /// BEGIN YOUR SOLUTION
-  
+  CompactIndex indices(offset, shape,strides);
+  int counter = 0;
+  while(!indices.is_end()){
+    out->ptr[counter] = a.ptr[indices.get()];
+    indices.inc();
+    counter++;
+  }
   /// END YOUR SOLUTION
 }
 
@@ -80,7 +130,14 @@ void EwiseSetitem(const AlignedArray& a, AlignedArray* out, std::vector<int32_t>
    *   offset: offset of the *out* array (not a, which has zero offset, being compact)
    */
   /// BEGIN YOUR SOLUTION
-  
+  CompactIndex indices(offset, shape,strides);
+  int counter = 0;
+  while(!indices.is_end()){
+    out->ptr[indices.get()] = a.ptr[counter];
+    // note there is data in the zero position.
+    indices.inc();
+    counter++;
+  }
   /// END YOUR SOLUTION
 }
 
@@ -101,27 +158,33 @@ void ScalarSetitem(const size_t size, scalar_t val, AlignedArray* out, std::vect
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  CompactIndex indices(offset, shape,strides);
+  int counter = 0;
+  while(!indices.is_end()){
+    out->ptr[indices.get()] = val;
+    indices.inc();
+    counter++;
+  }
   /// END YOUR SOLUTION
 }
 
-void EwiseAdd(const AlignedArray& a, const AlignedArray& b, AlignedArray* out) {
-  /**
-   * Set entries in out to be the sum of correspondings entires in a and b.
-   */
-  for (size_t i = 0; i < a.size; i++) {
-    out->ptr[i] = a.ptr[i] + b.ptr[i];
-  }
-}
+// void EwiseAdd(const AlignedArray& a, const AlignedArray& b, AlignedArray* out) {
+//   /**
+//    * Set entries in out to be the sum of correspondings entires in a and b.
+//    */
+//   for (size_t i = 0; i < a.size; i++) {
+//     out->ptr[i] = a.ptr[i] + b.ptr[i];
+//   }
+// }
 
-void ScalarAdd(const AlignedArray& a, scalar_t val, AlignedArray* out) {
-  /**
-   * Set entries in out to be the sum of correspondings entry in a plus the scalar val.
-   */
-  for (size_t i = 0; i < a.size; i++) {
-    out->ptr[i] = a.ptr[i] + val;
-  }
-}
+// void ScalarAdd(const AlignedArray& a, scalar_t val, AlignedArray* out) {
+//   /**
+//    * Set entries in out to be the sum of correspondings entry in a plus the scalar val.
+//    */
+//   for (size_t i = 0; i < a.size; i++) {
+//     out->ptr[i] = a.ptr[i] + val;
+//   }
+// }
 
 
 /**
@@ -145,7 +208,51 @@ void ScalarAdd(const AlignedArray& a, scalar_t val, AlignedArray* out) {
  */
 
 /// BEGIN YOUR SOLUTION
-
+#define EWiseOp(NAME,OP) \
+void Ewise##NAME(const AlignedArray& a, const AlignedArray& b, AlignedArray* out) {\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = a.ptr[i] OP b.ptr[i];                                     \
+  }                                                                         \
+}
+#define ScalarOp(NAME,OP) \
+void Scalar##NAME(const AlignedArray& a, scalar_t val, AlignedArray* out){\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = a.ptr[i] OP val;                                     \
+  }                                                                         \
+}
+#define EWiseFunction(NAME,F) \
+void Ewise##NAME(const AlignedArray& a, AlignedArray* out) {\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = F(a.ptr[i]);                                     \
+  }                                                                         \
+}
+#define ScalarFunction(NAME,F) \
+void Scalar##NAME(const AlignedArray& a, scalar_t val, AlignedArray* out){\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = F(a.ptr[i],val);                                     \
+  }                                                                         \
+}
+inline static scalar_t max(scalar_t a,scalar_t b){return a>b? a:b;}
+EWiseOp(Add,+)
+EWiseOp(Mul,*)
+EWiseOp(Div,/)
+EWiseOp(Eq,==)
+EWiseOp(Ge,>=)
+EWiseFunction(Log,log)
+EWiseFunction(Exp,exp)
+EWiseFunction(Tanh,tanh)
+ScalarOp(Add,+)
+ScalarOp(Mul,*)
+ScalarOp(Div,/)
+ScalarOp(Eq,==)
+ScalarOp(Ge,>=)
+ScalarFunction(Power,pow)
+ScalarFunction(Maximum,max)
+void EwiseMaximum(const AlignedArray& a,const AlignedArray& b,AlignedArray* out) {\
+  for (int i =0;i<a.size;i++){                                              \
+    out->ptr[i] = max(a.ptr[i],b.ptr[i]);                                     \
+  }                                                                         \
+}
 /// END YOUR SOLUTION
 
 void Matmul(const AlignedArray& a, const AlignedArray& b, AlignedArray* out, uint32_t m, uint32_t n,
@@ -164,7 +271,14 @@ void Matmul(const AlignedArray& a, const AlignedArray& b, AlignedArray* out, uin
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  for(int i =0;i<m;i++){
+    for(int k =0;k<p;k++){
+      out->ptr[i*p+k] = 0;
+      for(int j =0;j<n;j++){
+        out->ptr[i*p+k] += a.ptr[i*n+j] * b.ptr[j*p+k];
+      }
+    }
+  }
   /// END YOUR SOLUTION
 }
 
@@ -194,7 +308,13 @@ inline void AlignedDot(const float* __restrict__ a,
   out = (float*)__builtin_assume_aligned(out, TILE * ELEM_SIZE);
 
   /// BEGIN YOUR SOLUTION 
-   
+  for(int i =0;i<TILE;i++){
+    for(int k =0;k<TILE;k++){
+      for(int j =0;j<TILE;j++){
+        out[i*TILE+k] += a[i*TILE+j] * b[j*TILE+k];
+      }
+    }
+  }
   /// END YOUR SOLUTION
 }
 
@@ -220,7 +340,17 @@ void MatmulTiled(const AlignedArray& a, const AlignedArray& b, AlignedArray* out
    * 
    */
   /// BEGIN YOUR SOLUTION
-  
+  for(int i =0;i < m / TILE;i++){
+    for(int k=0;k< p /TILE;k++){
+      float* O = out->ptr + (i*p/TILE+k)*TILE*TILE;
+      memset(O,0,sizeof(scalar_t)*TILE*TILE);
+      for(int j =0;j < n / TILE;j ++){
+          float* A = a.ptr + (i* n/TILE+j)*TILE*TILE;
+          float* B = b.ptr + (j*p/TILE+k)*TILE*TILE;
+          AlignedDot(A,B,O);
+        }
+      }
+    }
   /// END YOUR SOLUTION
 }
 
@@ -235,7 +365,10 @@ void ReduceMax(const AlignedArray& a, AlignedArray* out, size_t reduce_size) {
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  for(int i = 0;i != out->size;i++){
+    auto base = a.ptr + i * reduce_size;
+    out->ptr[i] = *std::max_element(base,base+reduce_size);
+  }
   /// END YOUR SOLUTION
 }
 
@@ -250,7 +383,11 @@ void ReduceSum(const AlignedArray& a, AlignedArray* out, size_t reduce_size) {
    */
 
   /// BEGIN YOUR SOLUTION
-  
+  for(int i = 0;i != out->size;i++){
+    auto base = a.ptr + i * reduce_size;
+    // out[i] = std::reduce(base, base+reduce_size); // can only be used in cpp 17
+    out->ptr[i] = std::accumulate(base,base+reduce_size,static_cast<scalar_t>(0));
+  }
   /// END YOUR SOLUTION
 }
 
