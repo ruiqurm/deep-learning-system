@@ -530,7 +530,20 @@ class Flip(TensorOp):
 
     def compute(self, a):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        offset = 0
+        new_stides = []
+        for i in range(len(a.shape)):
+            if i in self.axes:
+                offset += (a.shape[i] - 1) * a.strides[i]
+                new_stides.append(-a.strides[i])
+            else:
+                new_stides.append(a.strides[i])
+        new_array = NDArray.make(a.shape,strides=new_stides,offset=offset,device=a.device)
+        new_array.compact()
+        print("new_array", new_array.strides)
+        return new_array
+        # array_api.ndarray.mak
+
         ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):

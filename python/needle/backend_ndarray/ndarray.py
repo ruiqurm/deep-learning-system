@@ -611,7 +611,10 @@ class NDArray:
         axes = ( (0, 0), (1, 1), (0, 0)) pads the middle axis with a 0 on the left and right side.
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        assert len(axes) <= self.ndim
+        assert all(len(a) == 2 for a in axes)
+        # TODO: just use numpy implementation for now
+        return array(np.pad(self.numpy(), axes, mode='constant', constant_values=0), device=self.device)
         ### END YOUR SOLUTION
 
 
