@@ -527,28 +527,14 @@ def split(a, axis):
 class Flip(TensorOp):
     def __init__(self, axes: Optional[tuple] = None):
         self.axes = axes
-
     def compute(self, a):
         ### BEGIN YOUR SOLUTION
-        offset = 0
-        new_stides = []
-        for i in range(len(a.shape)):
-            if i in self.axes:
-                offset += (a.shape[i] - 1) * a.strides[i]
-                new_stides.append(-a.strides[i])
-            else:
-                new_stides.append(a.strides[i])
-        new_array = NDArray.make(a.shape,strides=new_stides,offset=offset,device=a.device)
-        new_array.compact()
-        print("new_array", new_array.strides)
-        return new_array
-        # array_api.ndarray.mak
-
+        return a.flip(self.axes)
         ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        return out_grad.realize_cached_data().flip(self.axes)
         ### END YOUR SOLUTION
 
 
@@ -564,12 +550,25 @@ class Dilate(TensorOp):
 
     def compute(self, a):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        if self.axes is None:
+            return a
+        new_shape = []
+        steps = []
+        for i,axis in enumerate(a.shape):
+            if i in self.axes:
+                new_shape.append(axis*(1+self.dilation))
+                steps.append(slice(None,None,self.dilation+1))
+            else:
+                steps.append(slice(None,None,None))
+                new_shape.append(axis)
+        new_array = array_api.full(new_shape,0,device=a.device)
+        new_array[tuple(steps)] = a
+        return new_array
         ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        return undilate(out_grad, self.axes, self.dilation)
         ### END YOUR SOLUTION
 
 
@@ -583,12 +582,25 @@ class UnDilate(TensorOp):
 
     def compute(self, a):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        if self.axes is None:
+            return a
+        new_shape = []
+        steps = []
+        for i,axis in enumerate(a.shape):
+            if i in self.axes:
+                new_shape.append(axis // (1+self.dilation))
+                steps.append(slice(None,None,self.dilation+1))
+            else:
+                new_shape.append(axis)
+                steps.append(slice(None,None,None))
+        new_array = array_api.full(new_shape,0,device=a.device)
+        new_array = a[tuple(steps)]
+        return new_array
         ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        return dilate(out_grad, self.axes, self.dilation)
         ### END YOUR SOLUTION
 
 
@@ -603,17 +615,36 @@ class Conv(TensorOp):
 
     def compute(self, A, B):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        assert A.ndim == 4
+        assert B.ndim == 4
+        assert B.shape[0] == B.shape[1]
+        if self.padding !=0:
+            A = A.pad(((0,0),(self.padding,self.padding),(self.padding,self.padding),(0,0)))
+        N,H,W,C_in = A.shape
+        K,_,_,C_out = B.shape
+        Ns,Hs,Ws,Cs = A.strides
+        inner_dim = int(K * K * C_in)
+        new_h = int((H - K)/ self.stride + 1)
+        new_w = int((W - K)/ self.stride + 1)
+        A = A.as_strided(shape=(N, new_h, new_w, K,K,C_in),
+                     strides=(Ns, Hs*self.stride, Ws*self.stride, Hs, Ws, Cs)).compact() #用了两次compact
+        A = A.reshape(( N*new_h*new_w ,inner_dim))
+        B = B.reshape(( inner_dim, C_out))
+        out = A @ B
+        return out.reshape((N,new_h,new_w,C_out))
+        # return A
         ### END YOUR SOLUTION
 
     def gradient(self, out_grad, node):
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        X,W = node.inputs
+        W_trans=  transpose(flip(W,axes=(0,1)),axes=(2,3)) # shape = (K,K,C_out,C_in)
+        k = W.shape[0] # kernel_size 
+        pLpx = conv(out_grad, W_trans,self.stride,k - 1 - self.padding)
+        return (dydx,X)
         ### END YOUR SOLUTION
 
 
 def conv(a, b, stride=1, padding=1):
     return Conv(stride, padding)(a, b)
-
-
 

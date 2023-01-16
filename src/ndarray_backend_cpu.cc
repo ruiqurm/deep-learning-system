@@ -254,7 +254,6 @@ void EwiseMaximum(const AlignedArray& a,const AlignedArray& b,AlignedArray* out)
   }                                                                         \
 }
 /// END YOUR SOLUTION
-
 void Matmul(const AlignedArray& a, const AlignedArray& b, AlignedArray* out, uint32_t m, uint32_t n,
             uint32_t p) {
   /**

@@ -247,9 +247,8 @@ class NDArray:
 
         ### BEGIN YOUR SOLUTION
         assert isinstance(new_shape, tuple)
-        if new_shape:
-            assert prod(self._shape) == prod(new_shape), "product of current shape is not equal to the product of the new shape"
-        assert self.is_compact(), "the matrix is not compact"
+        # if new_shape:
+        #     assert prod(self._shape) == prod(new_shape), "product of current shape is not equal to the product of the new shape"
         return NDArray.make(
             new_shape, strides=self.compact_strides(new_shape), device=self.device, handle=self._handle
         )
@@ -600,7 +599,16 @@ class NDArray:
         Note: compact() before returning.
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        offset = 0
+        new_stides = []
+        for i in range(len(self.shape)):
+            if i in axes:
+                offset += (self.shape[i] - 1) * self.strides[i]
+                new_stides.append(-self.strides[i])
+            else:
+                new_stides.append(self.strides[i])
+        new_array = NDArray.make(self.shape,strides=tuple(new_stides),handle=self._handle,offset=offset,device=self.device)
+        return new_array.compact()
         ### END YOUR SOLUTION
 
 

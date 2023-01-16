@@ -2,7 +2,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-
+#include <limits> 
 #include <iostream>
 #include <sstream>
 
@@ -120,11 +120,29 @@ __global__ void CompactKernel(const scalar_t* a, scalar_t* out, size_t size, Cud
 
   /// BEGIN YOUR SOLUTION
   if (gid >=size)return;
-  size_t a_offset;
-  GetOffset(shape,strides,offset,&a_offset);
+  int32_t a_offset;
+  int32_t index[MAX_VEC_SIZE];
+
+  int layer_num = 1;
+  for(int i =0; i<shape.size;i++){
+      layer_num *= shape.data[i];
+  }
+  int32_t counter = gid;
+  for(int i =0;i<shape.size;i++){
+      layer_num /= shape.data[i];
+      index[i] = counter / layer_num;
+      counter %= layer_num;
+  }
+  a_offset = offset;
+  for(int i=0;i<strides.size;i++){
+      a_offset += strides.data[i] * index[i];
+  }
   out[gid] = a[a_offset];
   /// END YOUR SOLUTION
 }
+#include <iostream>
+using std::cout;
+using std::endl;
 
 void Compact(const CudaArray& a, CudaArray* out, std::vector<int32_t> shape,
              std::vector<int32_t> strides, size_t offset) {
@@ -154,8 +172,23 @@ __global__ void EwiseSetitemKernel(const scalar_t* a, scalar_t* out,size_t size,
 
     size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid >= size)return;
-    size_t out_offset;
-    GetOffset(shape,strides,offset,&out_offset);  
+    int32_t out_offset;
+    int32_t index[MAX_VEC_SIZE];
+  
+    int32_t layer_num = 1;
+    for(int i =0; i<shape.size;i++){
+        layer_num *= shape.data[i];
+    }
+    int32_t counter = gid;
+    for(int i =0;i<shape.size;i++){
+        layer_num /= shape.data[i];
+        index[i] = counter / layer_num;
+        counter %= layer_num;
+    }
+    out_offset = offset;
+    for(int i=0;i<strides.size;i++){
+        out_offset += strides.data[i] * index[i];
+    }
     out[out_offset] = a[gid];
 }
 
@@ -173,6 +206,7 @@ void EwiseSetitem(const CudaArray& a, CudaArray* out, std::vector<int32_t> shape
    *   offset: offset of the *out* array (not a, which has zero offset, being compact)
    */
   /// BEGIN YOUR SOLUTION
+  cout << "EwiseSetitem" << endl;
   CudaDims dim = CudaOneDim(out->size);
   EwiseSetitemKernel<<<dim.grid,dim.block>>>(a.ptr,out->ptr,a.size,VecToCuda(shape),VecToCuda(strides),offset);
   /// END YOUR SOLUTION
